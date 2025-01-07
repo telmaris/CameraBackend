@@ -15,6 +15,9 @@
 // ZED API
 #include <sl/Camera.hpp>
 // OAK API
+#include <depthai/depthai.hpp>
+// ASTRA API (OpenNI)
+#include <openni/OpenNI.h>
 
 const std::vector<cv::Scalar> colors = {cv::Scalar(255, 255, 0),
                                         cv::Scalar(0, 255, 0),
@@ -80,6 +83,23 @@ public:
     float getDistance(cv::Point) override;
     void processFrame() override;
     void close() override;
+
+    dai::Pipeline pipe;
+};
+
+class Astra : public Camera
+{
+public:
+    Astra() = default;
+    ~Astra() = default;
+
+    cv::Mat getColorFrame() override;
+    cv::Mat getDepthFrame() override;
+    float getDistance(cv::Point) override;
+    void processFrame() override;
+    void close() override;
+
+    openni::Device device;
 };
 
 class Network
