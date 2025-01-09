@@ -75,7 +75,7 @@ public:
 class OAK : public Camera
 {
 public:
-    OAK() = default;
+    OAK();
     ~OAK() = default;
 
     cv::Mat getColorFrame() override;
@@ -85,12 +85,31 @@ public:
     void close() override;
 
     dai::Pipeline pipe;
+    dai::Device device{pipe};
+
+    // mono camera objects (represent physical, left and right)
+    dai::node::MonoCamera* camLeft;
+    dai::node::MonoCamera* camRight;
+
+    // stereo handler object
+    dai::node::StereoDepth* stereo;
+
+    // XLinks handle video stream of a given type (color, depth)
+    dai::node::XLinkOut* qRgb;
+    dai::node::XLinkOut* qDepth;
+
+    // output data streams
+    dai::DataOutputQueue* qRgbOutput;
+    dai::DataOutputQueue* qDepthOutput;
+
+    // depth frame 
+    cv::Mat lastDepthFrame;
 };
 
 class Astra : public Camera
 {
 public:
-    Astra() = default;
+    Astra();
     ~Astra() = default;
 
     cv::Mat getColorFrame() override;
@@ -100,6 +119,10 @@ public:
     void close() override;
 
     openni::Device device;
+
+    // frame streams for color and depth
+    openni::VideoStream rgbStream;
+    openni::VideoStream depthStream;
 };
 
 class Network

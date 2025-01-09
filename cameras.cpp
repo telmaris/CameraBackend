@@ -104,7 +104,8 @@ void Backend::loop()
 
             cv::rectangle(frame, box, colors[1], 3);
             cv::rectangle(frame, cv::Point(box.x, box.y - 20), cv::Point(box.x + box.width, box.y), colors[1], cv::FILLED);
-            cv::putText(frame, "Distance: " + std::to_string(camera->getDistance(cv::Point(centerX, centerY))), cv::Point(box.x, box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
+            cv::putText(frame, "Distance: " + std::to_string(camera->getDistance(cv::Point(centerX, centerY))),
+             cv::Point(box.x, box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
         }
 
         cv::imshow(windowName, frame);
@@ -168,6 +169,8 @@ void Realsense::close()
 
 ZED::ZED()
 {
+    // Initialization
+
     sl::InitParameters initParameters;
     initParameters.camera_resolution = sl::RESOLUTION::HD720;
     initParameters.depth_mode = sl::DEPTH_MODE::PERFORMANCE;
@@ -176,6 +179,7 @@ ZED::ZED()
 
 void ZED::processFrame()
 {
+    // Frame acquisition by ZED - color frame and point cloud
     if (zed.grab() == sl::ERROR_CODE::SUCCESS)
     {
         zed.retrieveImage(lastZedFrame, sl::VIEW::LEFT);
@@ -186,27 +190,183 @@ void ZED::processFrame()
 
 cv::Mat ZED::getColorFrame()
 {
-    cv::Mat frame(frameSize, CV_8UC3, (void *)lastZedFrame.getPtr<sl::uchar4>(), cv::Mat::AUTO_STEP);
+    // Frame conversion to OpenCV format - TO DEBUG!!!
+    cv::Mat frame(frameSize, CV_8UC3, (void *)lastZedFrame.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
     return frame;
 }
 
 cv::Mat ZED::getDepthFrame()
 {
-    cv::Mat frame(frameSize, CV_8UC3, (void *)lastZedDepth.getPtr<sl::uchar4>(), cv::Mat::AUTO_STEP);
+
+    cv::Mat frame(frameSize, CV_8UC3, (void *)lastZedDepth.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
     return frame;
 }
 
 float ZED::getDistance(cv::Point pt)
 {
+    // get distance from the given point (centre of the bounding box)
     sl::float4 pointCloudValue;
     pointCloud.getValue(pt.x, pt.y, &pointCloudValue);
-    float distance = sqrt(pointCloudValue.x * pointCloudValue.x + 
-                            pointCloudValue.y * pointCloudValue.y + 
-                            pointCloudValue.z * pointCloudValue.z);
+    float distance = sqrt(pointCloudValue.x * pointCloudValue.x +
+                          pointCloudValue.y * pointCloudValue.y +
+                          pointCloudValue.z * pointCloudValue.z);
     return distance;
 }
 
 void ZED::close()
 {
+    // Close ZED camera
     zed.close();
+}
+
+/* ======================== OAK =============================*/
+
+OAK::OAK()
+{
+    // Define a mono camera for each stream (left and right)
+    camLeft = pipe.create<dai::node::MonoCamera>();
+    camRight = pipe.create<dai::node::MonoCamera>();
+
+    // Define stereo depth node
+    stereo = pipe.create<dai::node::StereoDepth>();
+
+    // Set up the cameras (MonoCamera nodes)
+    camLeft->setBoardSocket(dai::CameraBoardSocket::RGB);
+    camRight->setBoardSocket(dai::CameraBoardSocket::RGB);
+    camLeft->setResolution(dai::MonoCameraProperties::SensorResolution::THE_720_P);
+    camRight->setResolution(dai::MonoCameraProperties::SensorResolution::THE_720_P);
+
+    // Set the stereo depth properties
+    stereo->setLeftRightCheck(true);
+    stereo->setExtendedDisparity(true);
+    stereo->setSubpixel(true);
+
+    // Create output queues
+    qRgb = pipe.create<dai::node::XLinkOut>();
+    qRgb->setStreamName("video");
+    // color image comes from the left camera
+    camLeft->out.link(qRgb->input);
+
+    qDepth = pipe.create<dai::node::XLinkOut>();
+    qDepth->setStreamName("depth");
+    stereo->depth.link(qDepth->input);
+
+    // Output queues for RGB and depth frames
+    qRgbOutput = device.getOutputQueue("video", 8, false);
+    qDepthOutput = device.getOutputQueue("depth", 8, false);
+}
+
+cv::Mat OAK::getColorFrame()
+{
+    // Frame acquisition from output queue
+
+    std::shared_ptr<dai::ImgFrame> frame = qRgbOutput->get<dai::ImgFrame>();
+    //cv::Mat rgbMat(frame->getHeight(), frame->getWidth(), CV_16U, (void*)frame->getData());
+    cv::Mat rgbMat = frame->getCvFrame();
+    return rgbMat;
+}
+
+cv::Mat OAK::getDepthFrame()
+{
+
+    std::shared_ptr<dai::ImgFrame> frame = qDepthOutput->get<dai::ImgFrame>();
+    //cv::Mat depthMat(frame->getHeight(), frame->getWidth(), CV_8UC3, (void*)frame->getData());
+    cv::Mat depthMat = frame->getCvFrame();
+    lastDepthFrame = depthMat;
+    return depthMat;
+}
+
+float OAK::getDistance(cv::Point target)
+{
+    // DepthAI supports point cloud - dai::PointCloud, dai::PointCloudData
+    // here we try with depth aquired from the depth frame
+    cv::Mat depthDisplay;
+    // Normalize the depth values for visualization
+    lastDepthFrame.convertTo(depthDisplay, CV_8UC1, 255.0 / 10000);  
+    float distance = lastDepthFrame.at<float>(target.x, target.y) / 1000f; // scale to mm
+    
+    return distance;
+}
+
+void OAK::processFrame()
+{
+    // this function is not necessary for OAK as frame acquisition is done by the API
+}
+
+void OAK::close()
+{
+    qDepthOutput->close();
+    qRgbOutput->close();
+}
+
+/* ======================== ASTRA =============================*/
+
+Astra::Astra()
+{
+    // initialize OpenNI
+    if (openni::OpenNI::initialize(); != openni::STATUS_OK) {
+        std::cerr << "OpenNI initialization failed: " << openni::OpenNI::getExtendedError() << std::endl;
+        return 1;
+    }
+
+    // open an ASTRA physical camera
+    if (device.open(openni::ANY_DEVICE) != openni::STATUS_OK) {
+        std::cerr << "Failed to open device: " << openni::OpenNI::getExtendedError() << std::endl;
+        return 1;
+    }
+
+    // create a color camera object
+    if (rgbStream.create(device, openni::SENSOR_COLOR) != openni::STATUS_OK) {
+        std::cerr << "Failed to create RGB stream: " << openni::OpenNI::getExtendedError() << std::endl;
+        return 1;
+    }
+
+    // depth camera object
+    if (depthStream.create(device, openni::SENSOR_DEPTH); != openni::STATUS_OK) {
+        std::cerr << "Failed to create Depth stream: " << openni::OpenNI::getExtendedError() << std::endl;
+        return 1;
+    }
+
+
+}
+
+cv::Mat Astra::getColorFrame()
+{
+    // Frame acquisition from color stream
+
+    openni::VideoFrameRef rgbFrame;
+    rgbFrame.readFrame(&rgbFrame);
+
+    const openni::RGB888Pixel* rgbData = (const openni::RGB888Pixel*)rgbFrame.getData();
+    cv::Mat rgbMat(rgbFrame.getHeight(), rgbFrame.getWidth(), CV_8UC3, (void*)rgbData);
+    return rgbMat;
+}
+
+cv::Mat Astra::getDepthFrame()
+{
+    const uint16_t* depthData = (const uint16_t*)depthFrame.getData();
+    cv::Mat depthMat(depthFrame.getHeight(), depthFrame.getWidth(), CV_16U, (void*)depthData);
+
+    return depthMat;
+}
+
+float Astra::getDistance(cv::Point target)
+{  
+    float distance = depthMat.at<float>(target.x, target.y) / 1000f; // scale to mm
+    return distance;
+}
+
+void Astra::processFrame()
+{
+    // this function is not necessary for Astra as frame acquisition is done by the API
+}
+
+void Astra::close()
+{
+    // Close all streams, device and API
+    rgbStream.stop();
+    depthStream.stop();
+    device.close();
+
+    openni::OpenNI::shutdown();
 }
