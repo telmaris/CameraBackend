@@ -24,7 +24,10 @@ int Network::init()
         std::cout << "Failed to load model\n";
         return 1;
     }
-    model->setInputParams(1. / 255, cv::Size(416, 416), cv::Scalar(), true);
+
+    model->setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+    // model->setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+    model->setInputParams(1.0 / 255, cv::Size(416, 416), cv::Scalar(), true);
 
     return 0;
 }
@@ -36,12 +39,19 @@ std::vector<cv::Rect> Network::detect(cv::Mat frame)
     std::vector<cv::Rect> boxes;
     std::vector<cv::Rect> results;
 
-    model->detect(frame, classIds, confidences, boxes, 0.2, 0.4);
-
-    for (int i = 0; i < classIds.size(); ++i)
+    // Detecting objects in the image
+    if(frame.empty())
     {
-        if (confidences[i] > tConfidence && classIds[i] == 0)
+        std::cout << "ERROR: The frame is empty!!!\n";
+    }
+
+    model->detect(frame, classIds, confidences, boxes, 0.1, 0.1);
+
+    for (int i = 0; i < classIds.size(); i++)
+    {
+        if (confidences[i] > tConfidence && classIds[i] == 67)
         {
+            // std::cout << "detected a person\n";
             auto box = boxes[i];
             results.push_back(box);
         }
@@ -64,7 +74,7 @@ void Backend::parseArgs(int argc, char *argv[])
 
         if (arg == "zed")
         {
-            // camera = std::make_unique<ZED>();
+            camera = std::make_unique<ZED>();
             windowName = "ZED object detection and distance measurement";
             return;
         }
@@ -74,12 +84,18 @@ void Backend::parseArgs(int argc, char *argv[])
             windowName = "Realsense object detection and distance measurement";
             return;
         }
-        if (arg == "oak")
-        {
-            // camera = std::make_unique<OAK>();
-            windowName = "OAK object detection and distance measurement";
-            return;
-        }
+        // if (arg == "oak")
+        // {
+        //     camera = std::make_unique<OAK>();
+        //     windowName = "OAK object detection and distance measurement";
+        //     return;
+        // }
+        // if (arg == "astra")
+        // {
+        //     camera = std::make_unique<Astra>();
+        //     windowName = "Astra object detection and distance measurement";
+        //     return;
+        // }
     }
 }
 
@@ -174,6 +190,8 @@ ZED::ZED()
     sl::InitParameters initParameters;
     initParameters.camera_resolution = sl::RESOLUTION::HD720;
     initParameters.depth_mode = sl::DEPTH_MODE::PERFORMANCE;
+    initParameters.sdk_verbose = true;
+    frameSize = cv::Size(1280, 720);
     zed.open(initParameters);
 }
 
@@ -191,14 +209,17 @@ void ZED::processFrame()
 cv::Mat ZED::getColorFrame()
 {
     // Frame conversion to OpenCV format - TO DEBUG!!!
-    cv::Mat frame(frameSize, CV_8UC3, (void *)lastZedFrame.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
-    return frame;
+    cv::Mat frame(frameSize, CV_8UC4, (void *)lastZedFrame.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
+    cv::Mat rgbFrame;
+    cv::cvtColor(frame, rgbFrame, cv::COLOR_BGRA2BGR);
+
+    return rgbFrame;
 }
 
 cv::Mat ZED::getDepthFrame()
 {
 
-    cv::Mat frame(frameSize, CV_8UC3, (void *)lastZedDepth.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
+    cv::Mat frame(frameSize, CV_8UC4, (void *)lastZedDepth.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
     return frame;
 }
 
@@ -283,7 +304,7 @@ float OAK::getDistance(cv::Point target)
     cv::Mat depthDisplay;
     // Normalize the depth values for visualization
     lastDepthFrame.convertTo(depthDisplay, CV_8UC1, 255.0 / 10000);  
-    float distance = lastDepthFrame.at<float>(target.x, target.y) / 1000f; // scale to mm
+    float distance = depthDisplay.at<uint8_t>(target.x, target.y) / 1000.0f; // scale to mm
     
     return distance;
 }
@@ -304,27 +325,23 @@ void OAK::close()
 Astra::Astra()
 {
     // initialize OpenNI
-    if (openni::OpenNI::initialize(); != openni::STATUS_OK) {
+    if (openni::OpenNI::initialize() != openni::STATUS_OK) {
         std::cerr << "OpenNI initialization failed: " << openni::OpenNI::getExtendedError() << std::endl;
-        return 1;
     }
 
     // open an ASTRA physical camera
     if (device.open(openni::ANY_DEVICE) != openni::STATUS_OK) {
         std::cerr << "Failed to open device: " << openni::OpenNI::getExtendedError() << std::endl;
-        return 1;
     }
 
     // create a color camera object
     if (rgbStream.create(device, openni::SENSOR_COLOR) != openni::STATUS_OK) {
         std::cerr << "Failed to create RGB stream: " << openni::OpenNI::getExtendedError() << std::endl;
-        return 1;
     }
 
     // depth camera object
-    if (depthStream.create(device, openni::SENSOR_DEPTH); != openni::STATUS_OK) {
+    if (depthStream.create(device, openni::SENSOR_DEPTH) != openni::STATUS_OK) {
         std::cerr << "Failed to create Depth stream: " << openni::OpenNI::getExtendedError() << std::endl;
-        return 1;
     }
 
 
@@ -335,7 +352,7 @@ cv::Mat Astra::getColorFrame()
     // Frame acquisition from color stream
 
     openni::VideoFrameRef rgbFrame;
-    rgbFrame.readFrame(&rgbFrame);
+    rgbStream.readFrame(&rgbFrame);
 
     const openni::RGB888Pixel* rgbData = (const openni::RGB888Pixel*)rgbFrame.getData();
     cv::Mat rgbMat(rgbFrame.getHeight(), rgbFrame.getWidth(), CV_8UC3, (void*)rgbData);
@@ -344,15 +361,18 @@ cv::Mat Astra::getColorFrame()
 
 cv::Mat Astra::getDepthFrame()
 {
+    openni::VideoFrameRef depthFrame;
+    depthStream.readFrame(&depthFrame);
+
     const uint16_t* depthData = (const uint16_t*)depthFrame.getData();
     cv::Mat depthMat(depthFrame.getHeight(), depthFrame.getWidth(), CV_16U, (void*)depthData);
-
+    lastDepthFrame = depthMat;
     return depthMat;
 }
 
 float Astra::getDistance(cv::Point target)
 {  
-    float distance = depthMat.at<float>(target.x, target.y) / 1000f; // scale to mm
+    float distance = lastDepthFrame.at<uint8_t>(target.x, target.y) / 1000.0f; // scale to mm
     return distance;
 }
 

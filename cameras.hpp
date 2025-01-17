@@ -49,6 +49,7 @@ public:
     void close() override;
 
     sl::Camera zed;
+    //sl::Mat lastZedFrame{sl::Resolution{1280, 720}, sl::MAT_TYPE::U8_C3};
     sl::Mat lastZedFrame;
     sl::Mat lastZedDepth;
     sl::Mat pointCloud;
@@ -88,19 +89,19 @@ public:
     dai::Device device{pipe};
 
     // mono camera objects (represent physical, left and right)
-    dai::node::MonoCamera* camLeft;
-    dai::node::MonoCamera* camRight;
+    std::shared_ptr<dai::node::MonoCamera> camLeft;
+    std::shared_ptr<dai::node::MonoCamera> camRight;
 
     // stereo handler object
-    dai::node::StereoDepth* stereo;
+    std::shared_ptr<dai::node::StereoDepth> stereo;
 
     // XLinks handle video stream of a given type (color, depth)
-    dai::node::XLinkOut* qRgb;
-    dai::node::XLinkOut* qDepth;
+    std::shared_ptr<dai::node::XLinkOut> qRgb;
+    std::shared_ptr<dai::node::XLinkOut> qDepth;
 
     // output data streams
-    dai::DataOutputQueue* qRgbOutput;
-    dai::DataOutputQueue* qDepthOutput;
+    std::shared_ptr<dai::DataOutputQueue> qRgbOutput;
+    std::shared_ptr<dai::DataOutputQueue> qDepthOutput;
 
     // depth frame 
     cv::Mat lastDepthFrame;
@@ -123,6 +124,8 @@ public:
     // frame streams for color and depth
     openni::VideoStream rgbStream;
     openni::VideoStream depthStream;
+
+    cv::Mat lastDepthFrame;
 };
 
 class Network
@@ -139,7 +142,7 @@ public:
     std::string cfgPath = "../models/yolov4-tiny.cfg";
     std::string weightsPath = "../models/yolov4-tiny.weights";
 
-    float tConfidence = 0.6;
+    float tConfidence = 0.1;
 };
 
 class Backend
