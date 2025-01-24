@@ -30,6 +30,7 @@ public:
     virtual cv::Mat getColorFrame() = 0;
     virtual cv::Mat getDepthFrame() = 0;
     virtual float getDistance(cv::Point) = 0;
+    virtual cv::Point3f getCartesianPoint(cv::Point target) = 0;
     virtual void processFrame() = 0;
     virtual void close() = 0;
 
@@ -45,6 +46,7 @@ public:
     cv::Mat getColorFrame() override;
     cv::Mat getDepthFrame() override;
     float getDistance(cv::Point) override;
+    cv::Point3f getCartesianPoint(cv::Point target) override;
     void processFrame() override;
     void close() override;
 
@@ -65,11 +67,13 @@ public:
     cv::Mat getDepthFrame() override;
     float getDistance(cv::Point) override;
     void processFrame() override;
+    cv::Point3f getCartesianPoint(cv::Point target) override;
     void close() override;
 
     rs2::pipeline pipe;
     rs2::config cfg;
     std::unique_ptr<rs2::align> align;
+    rs2::pointcloud pointCloud;
     rs2::frame lastColorFrame, lastDepthFrame;
 };
 
@@ -82,29 +86,43 @@ public:
     cv::Mat getColorFrame() override;
     cv::Mat getDepthFrame() override;
     float getDistance(cv::Point) override;
+    cv::Point3f getCartesianPoint(cv::Point target) override;
     void processFrame() override;
     void close() override;
 
     dai::Pipeline pipe;
-    dai::Device device{pipe};
+    std::unique_ptr<dai::Device> device;
 
     // mono camera objects (represent physical, left and right)
     std::shared_ptr<dai::node::MonoCamera> camLeft;
     std::shared_ptr<dai::node::MonoCamera> camRight;
 
+    // color camera object
+
+    std::shared_ptr<dai::node::ColorCamera> camRgb;
+
     // stereo handler object
     std::shared_ptr<dai::node::StereoDepth> stereo;
+
+    std::shared_ptr<dai::node::PointCloud> pointcloud;
 
     // XLinks handle video stream of a given type (color, depth)
     std::shared_ptr<dai::node::XLinkOut> qRgb;
     std::shared_ptr<dai::node::XLinkOut> qDepth;
+    std::shared_ptr<dai::node::XLinkOut> qDebug;
+    std::shared_ptr<dai::node::XLinkOut> qPointCloud;
 
     // output data streams
     std::shared_ptr<dai::DataOutputQueue> qRgbOutput;
     std::shared_ptr<dai::DataOutputQueue> qDepthOutput;
+    std::shared_ptr<dai::DataOutputQueue> qDebugMono;
+    std::shared_ptr<dai::DataOutputQueue> qPointCloudOut;
 
     // depth frame 
     cv::Mat lastDepthFrame;
+    std::shared_ptr<dai::PointCloudData> pointcloudData;
+
+    float fx, fy, cx, cy; // focal lengths and principal points
 };
 
 class Astra : public Camera
@@ -116,6 +134,7 @@ public:
     cv::Mat getColorFrame() override;
     cv::Mat getDepthFrame() override;
     float getDistance(cv::Point) override;
+    cv::Point3f getCartesianPoint(cv::Point target) override;
     void processFrame() override;
     void close() override;
 
@@ -157,9 +176,12 @@ public:
     std::unique_ptr<Camera> camera;
     std::unique_ptr<Network> net;
 
+    // void setMeasurementPoint(int event, int x, int y, int flags, void* userdata);
+
     bool run = true;
     bool visualMode = true;
     std::string windowName = "default";
+    cv::Point measurementLocation;
 
 };
 
