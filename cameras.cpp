@@ -1,107 +1,27 @@
 #include "cameras.hpp"
+#include <iomanip>
+#include <algorithm>
 
 using namespace std::placeholders;
-
-int Network::init()
-{
-    net = cv::dnn::readNetFromDarknet(cfgPath, weightsPath);
-    if (net.empty())
-    {
-        std::cerr << "Error: Failed to load YOLOv4 model!" << std::endl;
-        return 1;
-    }
-
-    std::ifstream classFile("../models/coco.names");
-    std::string line;
-    while (std::getline(classFile, line))
-    {
-        classNames.push_back(line);
-    }
-    if (classNames.empty())
-        std::cout << "ERROR loading class names!\n";
-
-    model = std::make_unique<cv::dnn::DetectionModel>(net);
-    if (model == nullptr)
-    {
-        std::cout << "Failed to load model\n";
-        return 1;
-    }
-
-    // model->setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
-    // model->setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-    model->setInputParams(1.0 / 255, cv::Size(416, 416), cv::Scalar(), true);
-
-    return 0;
-}
-
-std::vector<cv::Rect> Network::detect(cv::Mat frame)
-{
-    std::vector<int> classIds;
-    std::vector<float> confidences;
-    std::vector<cv::Rect> boxes;
-    std::vector<cv::Rect> results;
-
-    // Detecting objects in the image
-    if (frame.empty())
-    {
-        std::cout << "ERROR: The frame is empty!!!\n";
-    }
-
-    model->detect(frame, classIds, confidences, boxes, 0.1, 0.1);
-
-    for (int i = 0; i < classIds.size(); i++)
-    {
-        if (confidences[i] > tConfidence && classIds[i] == 0)
-        {
-            auto box = boxes[i];
-            results.push_back(box);
-        }
-    }
-
-    return results;
-}
 
 void Backend::init()
 {
     // net = std::make_unique<Network>();
     // net->init();
+
+#ifdef zed
+    camera = std::make_unique<ZED>();
+    windowName = "ZED object detection and distance measurement";
+#endif
+#ifdef intel
+    camera = std::make_unique<Realsense>();
+    windowName = "Realsense object detection and distance measurement";
+#endif
+#ifdef oak
+    camera = std::make_unique<OAK>();
+    windowName = "OAK object detection and distance measurement";
+#endif
     cv::namedWindow(windowName);
-}
-
-void Backend::parseArgs(int argc, char *argv[])
-{
-    for (int i = 1; i < argc; i++)
-    {
-        std::string arg = argv[i];
-
-        if (arg == "zed")
-        {
-            camera = std::make_unique<ZED>();
-            windowName = "ZED object detection and distance measurement";
-            return;
-        }
-        if (arg == "intel")
-        {
-            camera = std::make_unique<Realsense>();
-            windowName = "Realsense object detection and distance measurement";
-            return;
-        }
-        if (arg == "oak")
-        {
-            camera = std::make_unique<OAK>();
-            windowName = "OAK object detection and distance measurement";
-            return;
-        }
-        // if (arg == "astra")
-        // {
-        //     camera = std::make_unique<Astra>();
-        //     windowName = "Astra object detection and distance measurement";
-        //     return;
-        // }
-
-        // auto callback = std::bind(&Backend::setMeasurementPoint,this, _1, _2, _3, _4, _5);
-        // cv::setMouseCallback(windowName, callback);
-    }
 }
 
 void Backend::loop()
@@ -114,8 +34,9 @@ void Backend::loop()
         camera->processFrame();
         auto color = camera->getColorFrame();
         auto depth = camera->getDepthFrame();
-        auto coord = camera->getCartesianPoint(measurementLocation);
-
+        auto pt = camera->getCartesianPoint(measurementLocation);
+        pointVector[frameCount++ % FILTER_LEN] = pt;
+        filterMeasurement();
         // auto boxes = net->detect(frame);
 
         // draw bounding boxes with distance measurement
@@ -131,17 +52,18 @@ void Backend::loop()
         //  cv::Point(box.x, box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
         // }
 
-        cv::Mat frame = color;
+        cv::Mat frame = depth;
 
         std::stringstream location;
-        location << "Measurement [" << coord.x << " , " << coord.y << " , " << coord.z << "]";
 
-        
+        location << std::fixed << std::setprecision(1) << "Measurement [" << coord.x << " , " << coord.y << " , " << coord.z << "]";
+        //std::to_string(camera->getDistance(measurementLocation))
 
         // indicate the measurement point with the circle
+
         cv::circle(frame, measurementLocation, 5, colors[1], -1);
-        // cv::putText(frame, location.str(), {20, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, colors[1]);
-        cv::putText(frame, std::to_string(camera->getDistance(measurementLocation)), {20, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, colors[1]);
+        cv::putText(frame, location.str(), {20, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, colors[1]);
+        cv::applyColorMap(frame, frame, cv::COLORMAP_JET);
         cv::imshow(windowName, frame);
 
         if (cv::waitKey(1) == 27)
@@ -152,8 +74,19 @@ void Backend::loop()
     std::cout << "Exit camera backend loop...\n";
 }
 
-/* ===================== REALSENSE ====================================*/
+void Backend::filterMeasurement()
+{
+    // add a constant offset here!
 
+    auto avgX = [this](){float r = 0; for(int i = 0; i < FILTER_LEN; i++){r += pointVector[i].x;} return (r/FILTER_LEN);};
+    auto avgY = [this](){float r = 0; for(int i = 0; i < FILTER_LEN; i++){r += pointVector[i].y;} return (r/FILTER_LEN);};
+    auto avgZ = [this](){float r = 0; for(int i = 0; i < FILTER_LEN; i++){r += pointVector[i].z;} return (r/FILTER_LEN);};
+
+    coord = cv::Point3f{avgX(), avgY(), avgZ()};
+}
+
+/* ===================== REALSENSE ====================================*/
+#ifdef intel
 Realsense::Realsense()
 {
     frameSize = cv::Size(640, 480);
@@ -204,9 +137,9 @@ void Realsense::close()
 {
     pipe.stop();
 }
-
+#endif
 /* ======================== ZED =============================*/
-
+#ifdef zed
 ZED::ZED()
 {
     // Initialization
@@ -216,21 +149,28 @@ ZED::ZED()
     initParameters.depth_mode = sl::DEPTH_MODE::ULTRA;
     initParameters.sdk_verbose = true;
     frameSize = cv::Size(1280, 720);
-    if (zed.open(initParameters) != sl::ERROR_CODE::SUCCESS)
+    try
     {
-        std::cout << "ERROR initializing zed!\n";
+        if (cam.open(initParameters) != sl::ERROR_CODE::SUCCESS)
+        {
+            std::cout << "ERROR initializing zed!\n";
+        }
+        std::cout << "Initialized zed\n";
     }
-    std::cout << "Initialized zed\n";
+    catch (const std::exception &e)
+    {
+        std::cerr << e.what() << '\n';
+    }
 }
 
 void ZED::processFrame()
 {
     // Frame acquisition by ZED - color frame and point cloud
-    if (zed.grab() == sl::ERROR_CODE::SUCCESS)
+    if (cam.grab() == sl::ERROR_CODE::SUCCESS)
     {
-        zed.retrieveImage(lastZedFrame, sl::VIEW::LEFT);
-        zed.retrieveMeasure(lastZedDepth, sl::MEASURE::DEPTH);
-        zed.retrieveMeasure(pointCloud, sl::MEASURE::XYZRGBA);
+        cam.retrieveImage(lastZedFrame, sl::VIEW::LEFT);
+        cam.retrieveMeasure(lastZedDepth, sl::MEASURE::DEPTH);
+        cam.retrieveMeasure(pointCloud, sl::MEASURE::XYZRGBA);
     }
 }
 
@@ -271,11 +211,11 @@ cv::Point3f ZED::getCartesianPoint(cv::Point target)
 void ZED::close()
 {
     // Close ZED camera
-    zed.close();
+    cam.close();
 }
-
+#endif
 /* ======================== OAK =============================*/
-
+#ifdef oak
 OAK::OAK()
 {
     // Define a mono camera for each stream (left and right)
@@ -308,8 +248,6 @@ OAK::OAK()
 
     camLeft->out.link(stereo->left);
     camRight->out.link(stereo->right);
-
-    
 
     // Create output queues
     qRgb = pipe.create<dai::node::XLinkOut>();
@@ -362,9 +300,9 @@ cv::Mat OAK::getDepthFrame()
     std::shared_ptr<dai::ImgFrame> frame = qDepthOutput->get<dai::ImgFrame>();
     // cv::Mat depthMat(frame->getHeight(), frame->getWidth(), CV_8UC3, (void*)frame->getData());
     cv::Mat depthMat = frame->getCvFrame();
-    depthMat.convertTo(depthMat, CV_8UC1, 255 / stereo->initialConfig.getMaxDisparity());
+    //depthMat.convertTo(depthMat, CV_8UC1, 255.0 / stereo->initialConfig.getMaxDisparity());
     lastDepthFrame = depthMat;
-    pointcloudData = qPointCloudOut->get<dai::PointCloudData>();
+    // pointcloudData = qPointCloudOut->get<dai::PointCloudData>();
 
     return depthMat;
 }
@@ -431,73 +369,63 @@ void OAK::close()
     qDepthOutput->close();
     qRgbOutput->close();
 }
+#endif
 
-/* ======================== ASTRA =============================*/
-
-// Astra::Astra()
+// int Network::init()
 // {
-//     // initialize OpenNI
-//     if (openni::OpenNI::initialize() != openni::STATUS_OK) {
-//         std::cerr << "OpenNI initialization failed: " << openni::OpenNI::getExtendedError() << std::endl;
+//     net = cv::dnn::readNetFromDarknet(cfgPath, weightsPath);
+//     if (net.empty())
+//     {
+//         std::cerr << "Error: Failed to load YOLOv4 model!" << std::endl;
+//         return 1;
 //     }
 
-//     // open an ASTRA physical camera
-//     if (device.open(openni::ANY_DEVICE) != openni::STATUS_OK) {
-//         std::cerr << "Failed to open device: " << openni::OpenNI::getExtendedError() << std::endl;
+//     std::ifstream classFile("../models/coco.names");
+//     std::string line;
+//     while (std::getline(classFile, line))
+//     {
+//         classNames.push_back(line);
+//     }
+//     if (classNames.empty())
+//         std::cout << "ERROR loading class names!\n";
+
+//     model = std::make_unique<cv::dnn::DetectionModel>(net);
+//     if (model == nullptr)
+//     {
+//         std::cout << "Failed to load model\n";
+//         return 1;
 //     }
 
-//     // create a color camera object
-//     if (rgbStream.create(device, openni::SENSOR_COLOR) != openni::STATUS_OK) {
-//         std::cerr << "Failed to create RGB stream: " << openni::OpenNI::getExtendedError() << std::endl;
+//     // model->setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+//     // model->setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+//     model->setInputParams(1.0 / 255, cv::Size(416, 416), cv::Scalar(), true);
+
+//     return 0;
+// }
+
+// std::vector<cv::Rect> Network::detect(cv::Mat frame)
+// {
+//     std::vector<int> classIds;
+//     std::vector<float> confidences;
+//     std::vector<cv::Rect> boxes;
+//     std::vector<cv::Rect> results;
+
+//     // Detecting objects in the image
+//     if (frame.empty())
+//     {
+//         std::cout << "ERROR: The frame is empty!!!\n";
 //     }
 
-//     // depth camera object
-//     if (depthStream.create(device, openni::SENSOR_DEPTH) != openni::STATUS_OK) {
-//         std::cerr << "Failed to create Depth stream: " << openni::OpenNI::getExtendedError() << std::endl;
+//     model->detect(frame, classIds, confidences, boxes, 0.1, 0.1);
+
+//     for (int i = 0; i < classIds.size(); i++)
+//     {
+//         if (confidences[i] > tConfidence && classIds[i] == 0)
+//         {
+//             auto box = boxes[i];
+//             results.push_back(box);
+//         }
 //     }
 
-// }
-
-// cv::Mat Astra::getColorFrame()
-// {
-//     // Frame acquisition from color stream
-
-//     openni::VideoFrameRef rgbFrame;
-//     rgbStream.readFrame(&rgbFrame);
-
-//     const openni::RGB888Pixel* rgbData = (const openni::RGB888Pixel*)rgbFrame.getData();
-//     cv::Mat rgbMat(rgbFrame.getHeight(), rgbFrame.getWidth(), CV_8UC3, (void*)rgbData);
-//     return rgbMat;
-// }
-
-// cv::Mat Astra::getDepthFrame()
-// {
-//     openni::VideoFrameRef depthFrame;
-//     depthStream.readFrame(&depthFrame);
-
-//     const uint16_t* depthData = (const uint16_t*)depthFrame.getData();
-//     cv::Mat depthMat(depthFrame.getHeight(), depthFrame.getWidth(), CV_16U, (void*)depthData);
-//     lastDepthFrame = depthMat;
-//     return depthMat;
-// }
-
-// float Astra::getDistance(cv::Point target)
-// {
-//     float distance = lastDepthFrame.at<uint8_t>(target.x, target.y) / 1000.0f; // scale to mm
-//     return distance;
-// }
-
-// void Astra::processFrame()
-// {
-//     // this function is not necessary for Astra as frame acquisition is done by the API
-// }
-
-// void Astra::close()
-// {
-//     // Close all streams, device and API
-//     rgbStream.stop();
-//     depthStream.stop();
-//     device.close();
-
-//     openni::OpenNI::shutdown();
+//     return results;
 // }
