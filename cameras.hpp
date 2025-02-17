@@ -76,6 +76,7 @@ public:
     std::unique_ptr<rs2::align> align;
     rs2::pointcloud pointCloud;
     rs2::frame lastColorFrame, lastDepthFrame;
+    rs2_intrinsics intr;
 };
 #endif
 #ifdef oak
@@ -148,9 +149,9 @@ public:
     bool run = true;
     bool visualMode = true;
     std::string windowName = "default";
-    cv::Point measurementLocation;
+    cv::Point measurementLocation{0,0};
     std::array<cv::Point3f, FILTER_LEN> pointVector;
-    cv::Point3f coord;
+    cv::Point3f coord{0,0,0};
     int frameCount = 0;
 };
 

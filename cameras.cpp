@@ -16,27 +16,33 @@ void Backend::init()
 #ifdef intel
     camera = std::make_unique<Realsense>();
     windowName = "Realsense object detection and distance measurement";
+    std::cout << "Realsense camera initialization\n";
 #endif
 #ifdef oak
     camera = std::make_unique<OAK>();
     windowName = "OAK object detection and distance measurement";
 #endif
+    // camera = std::make_unique<Realsense>();
+    std::cout << "Window name: " << windowName << std::endl;
     cv::namedWindow(windowName);
 }
 
 void Backend::loop()
 {
+    if (camera == nullptr) return;
     std::cout << "Entering camera loop...\n";
-    if (camera == nullptr)
-        run = false;
+    run = true;
     while (run)
     {
         camera->processFrame();
+        std::cout << "getting color frame\n";
         auto color = camera->getColorFrame();
+        std::cout << "getting depth frame\n";
         auto depth = camera->getDepthFrame();
-        auto pt = camera->getCartesianPoint(measurementLocation);
-        pointVector[frameCount++ % FILTER_LEN] = pt;
-        filterMeasurement();
+        std::cout << "getting cartesian point\n";
+        // auto pt = camera->getCartesianPoint(measurementLocation);
+        // pointVector[frameCount++ % FILTER_LEN] = pt;
+        // filterMeasurement();
         // auto boxes = net->detect(frame);
 
         // draw bounding boxes with distance measurement
@@ -52,7 +58,7 @@ void Backend::loop()
         //  cv::Point(box.x, box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
         // }
 
-        cv::Mat frame = depth;
+        cv::Mat frame = color;
 
         std::stringstream location;
 
@@ -101,13 +107,17 @@ Realsense::Realsense()
 
 void Realsense::processFrame()
 {
+    std::cout << "wait for frames\n";
     // Wait for frames
     rs2::frameset frames = pipe.wait_for_frames();
 
+    std::cout << "processing frame\n";
     // Align the frames
     frames = align->process(frames);
     lastColorFrame = frames.get_color_frame();
     lastDepthFrame = frames.get_depth_frame();
+    std::cout << "processing intrinsics\n";
+    // intr = rs2::video_stream_profile(lastDepthFrame.get_profile()).get_intrinsics();
 }
 
 cv::Mat Realsense::getColorFrame()
@@ -130,7 +140,11 @@ float Realsense::getDistance(cv::Point pt)
 
 cv::Point3f Realsense::getCartesianPoint(cv::Point target)
 {
-    return cv::Point3f(0, 0, 0);
+    float coords[3];
+    float xy[2] = {float(target.x), float(target.y)};
+    auto dist = rs2::depth_frame(lastDepthFrame).get_distance(target.x, target.y);
+    rs2_deproject_pixel_to_point(coords, &intr, xy, dist);
+    return cv::Point3f(coords[0], coords[1], coords[2]);
 }
 
 void Realsense::close()
