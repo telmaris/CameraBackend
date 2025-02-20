@@ -1,6 +1,7 @@
 #include "cameras.hpp"
 #include <iomanip>
 #include <algorithm>
+#include <chrono>
 
 using namespace std::placeholders;
 
@@ -27,6 +28,19 @@ void Backend::init()
     cv::namedWindow(windowName);
 }
 
+void Backend::savePointcloud()
+{
+    std::stringstream ss;
+    auto in_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    ss << std::put_time(std::localtime(&in_time_t), "%H-%S-%M");
+    ss << "_cloud.pcd";
+    std::cout << "Saved a pointcloud with name " << ss.str() << std::endl;
+    #ifdef intel
+    cloud = camera->getPointCloud();
+    pcl::io::savePCDFileASCII (ss.str(), cloud);
+    #endif
+}
+
 void Backend::loop()
 {
     if (camera == nullptr) return;
@@ -35,14 +49,11 @@ void Backend::loop()
     while (run)
     {
         camera->processFrame();
-        std::cout << "getting color frame\n";
         auto color = camera->getColorFrame();
-        std::cout << "getting depth frame\n";
         auto depth = camera->getDepthFrame();
-        std::cout << "getting cartesian point\n";
-        // auto pt = camera->getCartesianPoint(measurementLocation);
-        // pointVector[frameCount++ % FILTER_LEN] = pt;
-        // filterMeasurement();
+        auto pt = camera->getCartesianPoint(measurementLocation);
+        pointVector[frameCount++ % FILTER_LEN] = pt;
+        filterMeasurement();
         // auto boxes = net->detect(frame);
 
         // draw bounding boxes with distance measurement
@@ -69,13 +80,22 @@ void Backend::loop()
 
         cv::circle(frame, measurementLocation, 5, colors[1], -1);
         cv::putText(frame, location.str(), {20, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, colors[1]);
-        cv::applyColorMap(frame, frame, cv::COLORMAP_JET);
+        // cv::applyColorMap(frame, frame, cv::COLORMAP_JET);
         cv::imshow(windowName, frame);
 
-        if (cv::waitKey(1) == 27)
+        auto key = cv::waitKey(1);
+
+        switch(key)
         {
-            run = false;
+            case 's':
+                std::cout << "saving pointcloud\n";
+                savePointcloud();
+                break;
+            case 27:
+                run = false;
+                break;
         }
+        
     }
     std::cout << "Exit camera backend loop...\n";
 }
@@ -102,22 +122,19 @@ Realsense::Realsense()
 
     pipe.start(cfg);
     align = std::make_unique<rs2::align>(RS2_STREAM_COLOR);
-    // pointCloud = rs2::context().create_pointcloud();
 }
 
 void Realsense::processFrame()
 {
-    std::cout << "wait for frames\n";
     // Wait for frames
     rs2::frameset frames = pipe.wait_for_frames();
 
-    std::cout << "processing frame\n";
     // Align the frames
     frames = align->process(frames);
     lastColorFrame = frames.get_color_frame();
     lastDepthFrame = frames.get_depth_frame();
-    std::cout << "processing intrinsics\n";
-    // intr = rs2::video_stream_profile(lastDepthFrame.get_profile()).get_intrinsics();
+    
+    intr = rs2::video_stream_profile(lastDepthFrame.get_profile()).get_intrinsics();
 }
 
 cv::Mat Realsense::getColorFrame()
@@ -138,13 +155,36 @@ float Realsense::getDistance(cv::Point pt)
     return rs2::depth_frame(lastDepthFrame).get_distance(pt.x, pt.y);
 }
 
+pcl::PointCloud<pcl::PointXYZ> Realsense::getPointCloud()
+{
+    rs2::points points = pointCloud.calculate(lastDepthFrame);
+    auto sp = points.get_profile().as<rs2::video_stream_profile>();
+
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+
+    cloud.width = sp.width();
+    cloud.height = sp.height();
+    cloud.is_dense = false;
+    cloud.points.resize(points.size());
+    auto ptr = points.get_vertices();
+    for (auto& p : cloud.points)
+    {
+        p.x = ptr->x;
+        p.y = ptr->y;
+        p.z = ptr->z;
+        ptr++;
+    }
+
+    return cloud;
+}
+
 cv::Point3f Realsense::getCartesianPoint(cv::Point target)
 {
     float coords[3];
     float xy[2] = {float(target.x), float(target.y)};
     auto dist = rs2::depth_frame(lastDepthFrame).get_distance(target.x, target.y);
     rs2_deproject_pixel_to_point(coords, &intr, xy, dist);
-    return cv::Point3f(coords[0], coords[1], coords[2]);
+    return cv::Point3f(coords[0]*1000, coords[1]*1000, coords[2]*1000);
 }
 
 void Realsense::close()
@@ -220,6 +260,13 @@ cv::Point3f ZED::getCartesianPoint(cv::Point target)
     pointCloud.getValue(target.x, target.y, &point);
 
     return cv::Point3f(point.x, point.y, point.z);
+}
+
+pcl::PointCloud<pcl::PointXYZ> ZED::getPointCloud()
+{
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+
+    return cloud;
 }
 
 void ZED::close()
@@ -335,42 +382,13 @@ float OAK::getDistance(cv::Point target)
 
 cv::Point3f OAK::getCartesianPoint(cv::Point target)
 {
-    // auto points = pointcloudData->getPoints();
-    // int width = pointcloudData->getWidth();
-    // int height = pointcloudData->getHeight();
-
-    // // Create a blank 2D image to project the point cloud onto
-    // cv::Mat projectionImage = cv::Mat::zeros(height, width, CV_8UC3);
-
-    // // Iterate through the point cloud to project each 3D point onto 2D
-    // for (int y = 0; y < height; ++y)
-    // {
-    //     for (int x = 0; x < width; ++x)
-    //     {
-    //         // Calculate the index of the 3D point in the raw vector
-    //         int index = y * width + x;
-
-    //         // Get the 3D point (X, Y, Z)
-    //         dai::Point3f point3D = points[index];
-
-    //         // Check if the depth (Z) is valid
-    //         if (point3D.z != 0)
-    //         {
-    //             // Project 3D point onto 2D using camera intrinsics
-    //             int u = static_cast<int>(fx * point3D.x / point3D.z + cx);
-    //             int v = static_cast<int>(fy * point3D.y / point3D.z + cy);
-
-    //             // // Ensure (u, v) is within the image bounds
-    //             // if (u >= 0 && u < width && v >= 0 && v < height)
-    //             // {
-    //             //     // Color the projected pixel (this can be adjusted)
-    //             //     projectionImage.at<cv::Vec3b>(v, u) = cv::Vec3b(255, 255, 255); // White pixel
-    //             // }
-    //         }
-    //     }
-    // }
-
     return cv::Point3f(0, 0, 0);
+}
+
+pcl::PointCloud<pcl::PointXYZ> OAK::getPointCloud()
+{
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+    return cloud;
 }
 
 void OAK::processFrame()

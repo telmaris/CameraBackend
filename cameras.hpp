@@ -11,6 +11,9 @@
 // OpenCV 4 DNN for setting up the neural network for detection
 // #include <opencv2/dnn.hpp>
 
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+
 #define FILTER_LEN 30
 
 const std::vector<cv::Scalar> colors = {cv::Scalar(255, 255, 0),
@@ -26,6 +29,7 @@ public:
     virtual cv::Mat getDepthFrame() = 0;
     virtual float getDistance(cv::Point) = 0;
     virtual cv::Point3f getCartesianPoint(cv::Point target) = 0;
+    virtual pcl::PointCloud<pcl::PointXYZ> getPointCloud() = 0;
     virtual void processFrame() = 0;
     virtual void close() = 0;
 
@@ -45,6 +49,7 @@ public:
     cv::Mat getDepthFrame() override;
     float getDistance(cv::Point) override;
     cv::Point3f getCartesianPoint(cv::Point target) override;
+    pcl::PointCloud<pcl::PointXYZ> getPointCloud() override;
     void processFrame() override;
     void close() override;
 
@@ -69,6 +74,7 @@ public:
     float getDistance(cv::Point) override;
     void processFrame() override;
     cv::Point3f getCartesianPoint(cv::Point target) override;
+    pcl::PointCloud<pcl::PointXYZ> getPointCloud() override;
     void close() override;
 
     rs2::pipeline pipe;
@@ -92,6 +98,8 @@ public:
     cv::Mat getDepthFrame() override;
     float getDistance(cv::Point) override;
     cv::Point3f getCartesianPoint(cv::Point target) override;
+    pcl::PointCloud<pcl::PointXYZ> getPointCloud() override;
+
     void processFrame() override;
     void close() override;
 
@@ -140,6 +148,7 @@ public:
 
     void loop();
     void filterMeasurement();
+    void savePointcloud();
 
     std::unique_ptr<Camera> camera;
     // std::unique_ptr<Network> net;
@@ -153,6 +162,7 @@ public:
     std::array<cv::Point3f, FILTER_LEN> pointVector;
     cv::Point3f coord{0,0,0};
     int frameCount = 0;
+    pcl::PointCloud<pcl::PointXYZ> cloud;
 };
 
 #endif
