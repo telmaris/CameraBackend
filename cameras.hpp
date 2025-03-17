@@ -118,24 +118,31 @@ public:
     std::shared_ptr<dai::node::StereoDepth> stereo;
 
     std::shared_ptr<dai::node::PointCloud> pointcloud;
+    std::shared_ptr<dai::node::SpatialLocationCalculator> spatial;
 
     // XLinks handle video stream of a given type (color, depth)
     std::shared_ptr<dai::node::XLinkOut> qRgb;
     std::shared_ptr<dai::node::XLinkOut> qDepth;
     std::shared_ptr<dai::node::XLinkOut> qDebug;
     std::shared_ptr<dai::node::XLinkOut> qPointCloud;
-
+    std::shared_ptr<dai::node::XLinkOut> spatialOut;
+    std::shared_ptr<dai::node::XLinkIn> spatialConfig;
+    
     // output data streams
     std::shared_ptr<dai::DataOutputQueue> qRgbOutput;
     std::shared_ptr<dai::DataOutputQueue> qDepthOutput;
     std::shared_ptr<dai::DataOutputQueue> qDebugMono;
     std::shared_ptr<dai::DataOutputQueue> qPointCloudOut;
+    std::shared_ptr<dai::DataOutputQueue> spatialData;
+    std::shared_ptr<dai::DataInputQueue> spatialConfigQ;
 
     // depth frame 
+    std::shared_ptr<dai::ImgFrame> depthFrame;
     cv::Mat lastDepthFrame;
     std::shared_ptr<dai::PointCloudData> pointcloudData;
 
-    float fx, fy, cx, cy; // focal lengths and principal points
+    float fx, fy, cx, cy, fov; // focal lengths and principal points
+    cv::Point lastTarget{0,0};
 };
 #endif
 
