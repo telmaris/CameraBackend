@@ -14,8 +14,10 @@ void setMeasurementPoint(int event, int x, int y, int flags, void* userdata)
 {
     if(event == cv::MouseEventTypes::EVENT_LBUTTONDBLCLK)
     {
-        std::cout << "Changing the measurement location\n";
-        static_cast<Backend*>(userdata)->measurementLocation = cv::Point{x,y};
+        std::cout << "Changing the measurement location to [" << x << ", " << y << "]\n"; 
+        auto backend = static_cast<Backend*>(userdata);
+        backend->measurementLocation = cv::Point{x,y};
+        backend->updateRoiPosition(x, y);
     }
 }
 

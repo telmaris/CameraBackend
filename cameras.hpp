@@ -156,8 +156,12 @@ public:
     void loop();
     void filterMeasurement();
     void savePointcloud();
+    void saveMeasurement();
+    void getCartesianLocationWithRoi();
+    void updateRoiSize(int px);
+    void updateRoiPosition(int x, int y);
 
-    std::unique_ptr<Camera> camera;
+    std::shared_ptr<Camera> camera;
     // std::unique_ptr<Network> net;
 
     // void setMeasurementPoint(int event, int x, int y, int flags, void* userdata);
@@ -165,11 +169,17 @@ public:
     bool run = true;
     bool visualMode = true;
     std::string windowName = "default";
-    cv::Point measurementLocation{0,0};
+    cv::Point measurementLocation{100,100};
     std::array<cv::Point3f, FILTER_LEN> pointVector;
     cv::Point3f coord{0,0,0};
     int frameCount = 0;
     pcl::PointCloud<pcl::PointXYZ> cloud;
+    int roiSize = 3;
+    cv::Rect roi = {measurementLocation.x - (roiSize-1)/2,
+                    measurementLocation.y - (roiSize-1)/2,
+                    roiSize, roiSize};
+    int savedMeasurements = 0;
+    std::string cameraName;
 };
 
 #endif

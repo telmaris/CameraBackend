@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 
 project(cam)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
 
 find_package(OpenCV REQUIRED)
 find_package(realsense2 REQUIRED)
