@@ -10,6 +10,7 @@ find_package(ZED REQUIRED)
 find_package(CUDA 11.4 REQUIRED)
 find_package(depthai CONFIG REQUIRED)
 find_package(PCL REQUIRED)
+find_package(Threads REQUIRED)
 
 include_directories(../librealsense/include)
 include_directories(/usr/local/include/opencv4)
@@ -22,12 +23,12 @@ include_directories(${PCL_INCLUDE_DIRS})
 
 add_executable(zed main.cpp cameras.cpp)
 target_compile_definitions(zed PRIVATE -Dzed)
-target_link_libraries(zed PRIVATE ${ZED_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
+target_link_libraries(zed PRIVATE ${ZED_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES} Threads::Threads)
 
 add_executable(intel main.cpp cameras.cpp)
 target_compile_definitions(intel PRIVATE -Dintel)
-target_link_libraries(intel realsense2 ${OpenCV_LIBS} ${PCL_LIBRARIES})
+target_link_libraries(intel realsense2 ${OpenCV_LIBS} ${PCL_LIBRARIES} Threads::Threads)
 
 add_executable(oak main.cpp cameras.cpp)
 target_compile_definitions(oak PRIVATE -Doak)
-target_link_libraries(oak PRIVATE depthai::opencv ${OpenCV_LIBS} ${PCL_LIBRARIES})
+target_link_libraries(oak PRIVATE depthai::opencv ${OpenCV_LIBS} ${PCL_LIBRARIES} Threads::Threads)

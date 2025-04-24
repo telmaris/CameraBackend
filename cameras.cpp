@@ -3,23 +3,32 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <thread>
 
 using namespace std::placeholders;
+using namespace std::chrono_literals;
 
-std::ostream& operator<<(std::ostream& os, const cv::Point3f& point) {
+std::ostream &operator<<(std::ostream &os, const cv::Point3f &point)
+{
     os << "(" << point.x << ", " << point.y << ", " << point.z << ")";
     return os;
 }
 
-std::ostream& operator<<(std::ostream& os, const cv::Point& point) {
+std::ostream &operator<<(std::ostream &os, const cv::Point &point)
+{
     os << "(" << point.x << ", " << point.y << ")";
     return os;
 }
+
+int filter = 0;
 
 void Backend::init()
 {
     // net = std::make_unique<Network>();
     // net->init();
+
+    if (enableFilters)
+        filter = 1;
 
 #ifdef zed
     camera = std::make_shared<ZED>();
@@ -55,25 +64,32 @@ void Backend::savePointcloud()
 
 void Backend::saveMeasurement()
 {
-    auto in_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    if(savedMeasurements++ == 0)
+    for (int i = 0; i < measurementSeriesLength; i++)
     {
-        std::fstream file(cameraName + "_measurements.csv", std::ios::out | std::ios::trunc);
+        auto in_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        if (savedMeasurements++ == 0)
+        {
+            std::fstream file(cameraName + "_measurements.csv", std::ios::out | std::ios::trunc);
 
-        // Check if the file opened successfully
-        if (!file) {
-            std::cerr << "Failed to open the file!" << std::endl;
-            return;
+            // Check if the file opened successfully
+            if (!file)
+            {
+                std::cerr << "Failed to open the file!" << std::endl;
+                return;
+            }
+            file << cameraName << " measurements of depth on " << std::put_time(std::localtime(&in_time_t), "%d-%m-%Y") << std::endl;
         }
-        file << cameraName << " measurements of depth on " << std::put_time(std::localtime(&in_time_t), "%d-%m-%Y") << std::endl;
+        std::fstream file(cameraName + "_measurements.csv", std::ios::out | std::ios::app);
+        // file << coord << " at " << std::put_time(std::localtime(&in_time_t), "%S-%M-%H")
+        // << " measurement position: " << measurementLocation << " ROI size: " << roiSize << std::endl;
+        file << coord.x << "," << coord.y << "," << coord.z << std::endl;
+        if (savedMeasurements % 10 == 0)
+            file << std::endl;
+        file.close();
+        std::this_thread::sleep_for(100ms);
     }
-    std::fstream file(cameraName + "_measurements.csv", std::ios::out | std::ios::app);
-    // file << coord << " at " << std::put_time(std::localtime(&in_time_t), "%S-%M-%H") 
-    // << " measurement position: " << measurementLocation << " ROI size: " << roiSize << std::endl;
-    file << coord.x << "," << coord.y << "," << coord.z << std::endl;
-    if(savedMeasurements % 10 == 0) file << std::endl;
-    file.close();
-    std::cout << "Saved a measurement!\n";
+    isRunning = false;
+    std::cout << "Saved 10 measurements!\n";
 }
 
 void Backend::getCartesianLocationWithRoi()
@@ -106,7 +122,6 @@ void Backend::getCartesianLocationWithRoi()
     res.y /= results.size();
     res.z /= results.size();
     coord = res;
-
 }
 
 void Backend::updateRoiSize(int px)
@@ -117,19 +132,19 @@ void Backend::updateRoiSize(int px)
         roiSize += 2;
         return;
     }
-    #ifdef oak
+#ifdef oak
     dai::SpatialLocationCalculatorConfigData config;
-        config.roi = dai::Rect(dai::Point2f(measurementLocation.x - (roiSize - 1) / 2,
-                                            measurementLocation.y - (roiSize - 1) / 2),
-                               dai::Point2f(measurementLocation.x + (roiSize - 1) / 2,
-                                            measurementLocation.y + (roiSize - 1) / 2));
+    config.roi = dai::Rect(dai::Point2f(measurementLocation.x - (roiSize - 1) / 2,
+                                        measurementLocation.y - (roiSize - 1) / 2),
+                           dai::Point2f(measurementLocation.x + (roiSize - 1) / 2,
+                                        measurementLocation.y + (roiSize - 1) / 2));
 
-        dai::SpatialLocationCalculatorConfig cfg;
-        cfg.addROI(config);
-        auto cam = std::static_pointer_cast<OAK>(camera);
-        cam->spatialConfigQ->send(cfg);
-        cam->lastTarget = measurementLocation;
-    #endif
+    dai::SpatialLocationCalculatorConfig cfg;
+    cfg.addROI(config);
+    auto cam = std::static_pointer_cast<OAK>(camera);
+    cam->spatialConfigQ->send(cfg);
+    cam->lastTarget = measurementLocation;
+#endif
     roi = {measurementLocation.x - (roiSize - 1) / 2,
            measurementLocation.y - (roiSize - 1) / 2,
            roiSize, roiSize};
@@ -153,46 +168,39 @@ void Backend::loop()
         camera->processFrame();
         auto color = camera->getColorFrame();
         auto depth = camera->getDepthFrame();
+        cv::Mat frame = color;
+        if (!tuningMode)
+        {
+
 #ifdef oak
-        coord = camera->getCartesianPoint(measurementLocation);
+            coord = camera->getCartesianPoint(measurementLocation);
 #else
-        getCartesianLocationWithRoi();
+            getCartesianLocationWithRoi();
 #endif
 
-        pointVector[frameCount++ % FILTER_LEN] = coord;
-        filterMeasurement();
+            pointVector[frameCount++ % FILTER_LEN] = coord;
+            filterMeasurement();
 
-        // auto boxes = net->detect(frame);
+            std::stringstream location;
+            cv::rectangle(frame, {20, 20, 350, 20}, {255, 255, 255}, -1);
+            cv::rectangle(frame, roi, {255, 0, 0}, 1);
+            location << std::fixed << std::setprecision(1) << "Measurement [" << coord.x << " , " << coord.y << " , " << coord.z << "]";
 
-        // draw bounding boxes with distance measurement
-        // for (int i = 0; i < boxes.size(); ++i)
-        // {
-        //     auto box = boxes[i];
-        //     int centerX = box.x + box.width / 2;
-        //     int centerY = box.y + box.height / 2;
+            // indicate the measurement ROI with a square
 
-        //     cv::rectangle(frame, box, colors[1], 3);
-        //     cv::rectangle(frame, cv::Point(box.x, box.y - 20), cv::Point(box.x + box.width, box.y), colors[1], cv::FILLED);
-        // cv::putText(frame, "Distance: " + std::to_string(camera->getDistance(cv::Point(centerX, centerY))),
-        //  cv::Point(box.x, box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
-        // }
+            cv::putText(frame, location.str(), {21, 35}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {0, 0, 0});
+        }
+        else
+        {
+            cv::rectangle(frame, {lineType * verticalLinePos, (lineType ^ 1) * horizontalLinePos, (lineType ^ 1) * 1280 + 5, lineType * 720 + 5}, {0, 0, 255}, -1);
+        }
 
-        cv::Mat frame = color;
-        std::stringstream location;
-        cv::rectangle(frame, {20,20, 350, 20}, {255,255,255}, -1);
-        cv::rectangle(frame, roi, {255,0,0}, 1);
-        location << std::fixed << std::setprecision(1) << "Measurement [" << coord.x << " , " << coord.y << " , " << coord.z << "]";
-
-        // indicate the measurement point with the circle
-
-        cv::putText(frame, location.str(), {21, 35}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {0,0,0});
         cv::imshow(windowName, frame);
-
         auto key = cv::waitKey(1);
 
         switch (key)
         {
-        case 's':
+        case 'x':
             std::cout << "saving pointcloud\n";
             savePointcloud();
             break;
@@ -205,7 +213,37 @@ void Backend::loop()
             std::cout << "ROI size: " << roiSize << std::endl;
             break;
         case ' ':
-            saveMeasurement();
+            if (isRunning == false)
+            {
+                isRunning = true;
+                std::thread([this]()
+                            { this->saveMeasurement(); })
+                    .detach();
+            }
+            // saveMeasurement();
+            break;
+        case 't':
+            tuningMode = true;
+            break;
+        case 'l':
+            if (tuningMode)
+                lineType ^= 1;
+            break;
+        case 'w':
+            if (--horizontalLinePos < 0)
+                horizontalLinePos++;
+            break;
+        case 'a':
+            if (--verticalLinePos < 0)
+                verticalLinePos++;
+            break;
+        case 's':
+            if (++horizontalLinePos > camera->frameSize.height)
+                ;
+            break;
+        case 'd':
+            if (++verticalLinePos > camera->frameSize.width)
+                ;
             break;
         case 27:
             run = false;
@@ -252,6 +290,13 @@ void Realsense::processFrame()
     lastColorFrame = frames.get_color_frame();
     lastDepthFrame = frames.get_depth_frame();
 
+    // lastDepthFrame = dec_filter.process(lastDepthFrame);
+    if (filter)
+    {
+        lastDepthFrame = spat_filter.process(lastDepthFrame);
+        lastDepthFrame = temp_filter.process(lastDepthFrame);
+        lastDepthFrame = hole_filter.process(lastDepthFrame);
+    }
     intr = rs2::video_stream_profile(lastDepthFrame.get_profile()).get_intrinsics();
 }
 
@@ -302,7 +347,7 @@ cv::Point3f Realsense::getCartesianPoint(cv::Point target)
     float xy[2] = {float(target.x), float(target.y)};
     auto dist = rs2::depth_frame(lastDepthFrame).get_distance(target.x, target.y);
     rs2_deproject_pixel_to_point(coords, &intr, xy, dist);
-    return cv::Point3f(coords[0] * 1000, coords[1] * 1000, coords[2] * 1000);
+    return cv::Point3f(coords[0] * 1000, coords[1] * -1000, coords[2] * 1000);
 }
 
 void Realsense::close()
@@ -427,19 +472,20 @@ OAK::OAK()
     stereo->setSubpixel(true);
     stereo->setDefaultProfilePreset(dai::node::StereoDepth::PresetMode::HIGH_DENSITY);
     stereo->setDepthAlign(dai::CameraBoardSocket::LEFT);
+    if (filter)
     {
-    auto config = stereo->initialConfig.get();
+        auto config = stereo->initialConfig.get();
 
-    config.postProcessing.speckleFilter.enable = false;
-    config.postProcessing.speckleFilter.speckleRange = 50;
-    config.postProcessing.temporalFilter.enable = true;
-    config.postProcessing.spatialFilter.enable = true;
-    config.postProcessing.spatialFilter.holeFillingRadius = 2;
-    config.postProcessing.spatialFilter.numIterations = 1;
-    config.postProcessing.thresholdFilter.minRange = 400;
-    config.postProcessing.thresholdFilter.maxRange = 15000;
-    config.postProcessing.decimationFilter.decimationFactor = 1;
-    stereo->initialConfig.set(config);
+        config.postProcessing.speckleFilter.enable = true;
+        config.postProcessing.speckleFilter.speckleRange = 50;
+        config.postProcessing.temporalFilter.enable = true;
+        config.postProcessing.spatialFilter.enable = true;
+        config.postProcessing.spatialFilter.holeFillingRadius = 2;
+        config.postProcessing.spatialFilter.numIterations = 1;
+        config.postProcessing.thresholdFilter.minRange = 400;
+        config.postProcessing.thresholdFilter.maxRange = 15000;
+        config.postProcessing.decimationFilter.decimationFactor = 1;
+        stereo->initialConfig.set(config);
     }
     camLeft->out.link(stereo->left);
     camRight->out.link(stereo->right);
@@ -489,49 +535,6 @@ OAK::OAK()
     // qPointCloudOut = device->getOutputQueue("pointCloud", 8, false);
     spatialData = device->getOutputQueue("spatial", 8, false);
     spatialConfigQ = device->getInputQueue("spatialConfig");
-
-    auto calibration = device->readCalibration();
-    //device->setIrLaserDotProjectorIntensity(0);
-    auto intr = calibration.getCameraIntrinsics(dai::CameraBoardSocket::LEFT);
-    fx = intr[0][0];
-    fy = intr[1][1];
-    cx = intr[2][0];
-    cy = intr[2][1];
-    fov = calibration.getFov(dai::CameraBoardSocket::LEFT); //*(M_PI/180.0);
-    std::cout << "oak FOV in degrees: " << fov << std::endl;
-    std::cout << "Lens focal X and Y: " << fx << " " << fy << std::endl;
-    std::cout << "Lens center point X and Y: " << cx << " " << cy << std::endl;
-
-    intr = calibration.getCameraIntrinsics(dai::CameraBoardSocket::RIGHT);
-    fx = intr[0][0];
-    fy = intr[1][1];
-    cx = intr[2][0];
-    cy = intr[2][1];
-    fov = calibration.getFov(dai::CameraBoardSocket::LEFT); //*(M_PI/180.0);
-    std::cout << "oak FOV in degrees: " << fov << std::endl;
-    std::cout << "Lens focal X and Y: " << fx << " " << fy << std::endl;
-    std::cout << "Lens center point X and Y: " << cx << " " << cy << std::endl;
-
-    auto extr = calibration.getCameraExtrinsics(dai::CameraBoardSocket::LEFT, dai::CameraBoardSocket::RIGHT, false);
-    std::cout << "Extrinsics from camera:\n";
-    for (auto vec : extr)
-    {
-        for (auto f : vec)
-        {
-            std::cout << f << " ";
-        }
-        std::cout << std::endl;
-    }
-    auto extr2 = calibration.getCameraExtrinsics(dai::CameraBoardSocket::LEFT, dai::CameraBoardSocket::RIGHT, true);
-    std::cout << "Extrinsics from board design data:\n";
-    for (auto vec : extr2)
-    {
-        for (auto f : vec)
-        {
-            std::cout << f << " ";
-        }
-        std::cout << std::endl;
-    }
 }
 
 cv::Mat OAK::getColorFrame()

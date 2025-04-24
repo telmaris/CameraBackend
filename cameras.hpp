@@ -83,6 +83,11 @@ public:
     rs2::pointcloud pointCloud;
     rs2::frame lastColorFrame, lastDepthFrame;
     rs2_intrinsics intr;
+
+    // rs2::decimation_filter dec_filter;
+    rs2::spatial_filter spat_filter;  
+    rs2::temporal_filter temp_filter;
+    rs2::hole_filling_filter hole_filter;
 };
 #endif
 #ifdef oak
@@ -180,6 +185,13 @@ public:
                     roiSize, roiSize};
     int savedMeasurements = 0;
     std::string cameraName;
+    int verticalLinePos = 359;
+    int horizontalLinePos = 639;
+    int tuningMode = 0;
+    int lineType = 0; // 0 is horizontal
+    bool enableFilters = false;
+    std::atomic<bool> isRunning = false;
+    int measurementSeriesLength = 10;
 };
 
 #endif

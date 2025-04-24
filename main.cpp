@@ -25,7 +25,15 @@ int main(int argc, char** argv)
 {
     Backend base;
 
-    // base.parseArgs(camera);
+    if(argc == 2)
+    {
+        std::cout << "Detected an arg..\n";
+        if(std::string{argv[1]} == "f")
+        {
+            base.enableFilters = true;
+            std::cout << "Filters enabled\n";
+        }
+    }
     base.init();
     cv::setMouseCallback(base.windowName, setMeasurementPoint, &base);
     base.loop();
