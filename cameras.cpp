@@ -90,6 +90,10 @@ void Backend::saveMeasurement()
     }
     isRunning = false;
     std::cout << "Saved 10 measurements!\n";
+    std::stringstream time;
+    auto in_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    time << std::put_time(std::localtime(&in_time_t), "%S-%M-%H");
+    cv::imwrite("../img/" + cameraName + "_frame_" + time.str() + ".jpg", lastFrame);
 }
 
 void Backend::getCartesianLocationWithRoi()
@@ -157,6 +161,12 @@ void Backend::updateRoiPosition(int x, int y)
            roiSize, roiSize};
 }
 
+void Backend::tuneRoiPosition(int x, int y)
+{
+    roi.x += x;
+    roi.y += y;
+}
+
 void Backend::loop()
 {
     if (camera == nullptr)
@@ -169,6 +179,7 @@ void Backend::loop()
         auto color = camera->getColorFrame();
         auto depth = camera->getDepthFrame();
         cv::Mat frame = color;
+        lastFrame = frame;
         if (!tuningMode)
         {
 
@@ -230,20 +241,20 @@ void Backend::loop()
                 lineType ^= 1;
             break;
         case 'w':
-            if (--horizontalLinePos < 0)
-                horizontalLinePos++;
+            if (--roi.y < 0)
+                roi.y = 0;
             break;
         case 'a':
-            if (--verticalLinePos < 0)
-                verticalLinePos++;
+            if (--roi.x < 0)
+                roi.x = 0;
             break;
         case 's':
-            if (++horizontalLinePos > camera->frameSize.height)
-                ;
+            if (++roi.y > camera->frameSize.height)
+            roi.y = camera->frameSize.height;
             break;
         case 'd':
-            if (++verticalLinePos > camera->frameSize.width)
-                ;
+            if (++roi.x > camera->frameSize.width)
+            roi.x = camera->frameSize.width;
             break;
         case 27:
             run = false;
@@ -422,7 +433,7 @@ cv::Point3f ZED::getCartesianPoint(cv::Point target)
     sl::float4 point;
     pointCloud.getValue(target.x, target.y, &point);
 
-    return cv::Point3f(point.x, point.y, point.z);
+    return cv::Point3f(point.x, point.y, point.z - 0.017);
 }
 
 pcl::PointCloud<pcl::PointXYZ> ZED::getPointCloud()
@@ -590,7 +601,7 @@ cv::Point3f OAK::getCartesianPoint(cv::Point target)
     float y = data[0].spatialCoordinates.y;
     float z = data[0].spatialCoordinates.z;
 
-    return cv::Point3f(x, y, z);
+    return cv::Point3f(x, y, z - 0.005);
 }
 
 pcl::PointCloud<pcl::PointXYZ> OAK::getPointCloud()

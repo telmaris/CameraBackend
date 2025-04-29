@@ -165,6 +165,7 @@ public:
     void getCartesianLocationWithRoi();
     void updateRoiSize(int px);
     void updateRoiPosition(int x, int y);
+    void tuneRoiPosition(int x, int y);
 
     std::shared_ptr<Camera> camera;
     // std::unique_ptr<Network> net;
@@ -192,6 +193,7 @@ public:
     bool enableFilters = false;
     std::atomic<bool> isRunning = false;
     int measurementSeriesLength = 10;
+    cv::Mat lastFrame;
 };
 
 #endif
