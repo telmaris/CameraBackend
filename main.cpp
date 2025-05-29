@@ -9,6 +9,9 @@ const std::string camera = "intel";
 #ifdef oak
 const std::string camera = "oak";
 #endif
+#ifdef gemini
+const std::string camera = "gemini";
+#endif
 
 void setMeasurementPoint(int event, int x, int y, int flags, void* userdata)
 {

@@ -11,6 +11,7 @@ find_package(CUDA 11.4 REQUIRED)
 find_package(depthai CONFIG REQUIRED)
 find_package(PCL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(OrbbecSDK REQUIRED)
 
 include_directories(../librealsense/include)
 include_directories(/usr/local/include/opencv4)
@@ -20,6 +21,7 @@ include_directories(/home/mobilne/libs/depthai-core/build/install/lib/cmake/dept
 include_directories(${ZED_INCLUDE_DIRS})
 include_directories(/usr/local/depthai/lib/cmake/depthai/dependencies/include)
 include_directories(${PCL_INCLUDE_DIRS})
+include_directories(/usr/local/include/libobsensor)
 
 add_executable(zed main.cpp cameras.cpp)
 target_compile_definitions(zed PRIVATE -Dzed)
@@ -32,3 +34,7 @@ target_link_libraries(intel realsense2 ${OpenCV_LIBS} ${PCL_LIBRARIES} Threads::
 add_executable(oak main.cpp cameras.cpp)
 target_compile_definitions(oak PRIVATE -Doak)
 target_link_libraries(oak PRIVATE depthai::opencv ${OpenCV_LIBS} ${PCL_LIBRARIES} Threads::Threads)
+
+add_executable(gemini main.cpp cameras.cpp)
+target_compile_definitions(gemini PRIVATE -Dgemini)
+target_link_libraries(gemini PRIVATE ob::OrbbecSDK ${OpenCV_LIBS} ${PCL_LIBRARIES} Threads::Threads)

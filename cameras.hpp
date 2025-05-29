@@ -197,3 +197,33 @@ public:
 };
 
 #endif
+#ifdef gemini
+#include <libobsensor/ObSensor.hpp>
+#include <libobsensor/hpp/Utils.hpp>
+
+class Gemini : public Camera
+{
+    public:
+    Gemini();
+    ~Gemini() = default;
+
+    cv::Mat getColorFrame() override;
+    cv::Mat getDepthFrame() override;
+    float getDistance(cv::Point) override;
+    cv::Point3f getCartesianPoint(cv::Point target) override;
+    pcl::PointCloud<pcl::PointXYZ> getPointCloud() override;
+    void processFrame() override;
+    void close() override;
+
+    ob::Pipeline pipeline;
+    // ob::Config config;
+    std::shared_ptr<ob::Frame> colorFrame;
+    std::shared_ptr<ob::Frame> depthFrame;
+    OBCameraIntrinsic intrinsic; 
+    OBExtrinsic extrinsic;
+    ob::CoordinateTransformHelper transformHelper;
+    std::vector<std::shared_ptr<ob::Filter>> filters;
+
+};
+
+#endif

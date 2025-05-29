@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <thread>
+#include <filesystem>
 
 using namespace std::placeholders;
 using namespace std::chrono_literals;
@@ -45,6 +46,11 @@ void Backend::init()
     windowName = "OAK object detection and distance measurement";
     cameraName = "oak-d-pro";
 #endif
+#ifdef gemini
+    camera = std::make_shared<Gemini>();
+    windowName = "Gemini object detection and distance measurement";
+    cameraName = "gemini-335l";
+#endif
     std::cout << "Window name: " << windowName << std::endl;
     cv::namedWindow(windowName);
 }
@@ -64,12 +70,21 @@ void Backend::savePointcloud()
 
 void Backend::saveMeasurement()
 {
+    static int counter = 0;
+    std::string suffix{"_measurements_"};
+    std::string name{cameraName + suffix + std::to_string(counter) + ".csv"};
+
     for (int i = 0; i < measurementSeriesLength; i++)
     {
         auto in_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         if (savedMeasurements++ == 0)
         {
-            std::fstream file(cameraName + "_measurements.csv", std::ios::out | std::ios::trunc);
+            while(std::filesystem::exists(name))
+            {
+                counter++;
+                name = cameraName + suffix + std::to_string(counter) + ".csv";
+            }
+            std::fstream file(name, std::ios::out);
 
             // Check if the file opened successfully
             if (!file)
@@ -79,7 +94,7 @@ void Backend::saveMeasurement()
             }
             file << cameraName << " measurements of depth on " << std::put_time(std::localtime(&in_time_t), "%d-%m-%Y") << std::endl;
         }
-        std::fstream file(cameraName + "_measurements.csv", std::ios::out | std::ios::app);
+        std::fstream file(name, std::ios::out | std::ios::app);
         // file << coord << " at " << std::put_time(std::localtime(&in_time_t), "%S-%M-%H")
         // << " measurement position: " << measurementLocation << " ROI size: " << roiSize << std::endl;
         file << coord.x << "," << coord.y << "," << coord.z << std::endl;
@@ -177,6 +192,7 @@ void Backend::loop()
     {
         camera->processFrame();
         auto color = camera->getColorFrame();
+        // std::cout << color.size() << std::endl;
         auto depth = camera->getDepthFrame();
         cv::Mat frame = color;
         lastFrame = frame;
@@ -620,6 +636,152 @@ void OAK::close()
     qDepthOutput->close();
     qRgbOutput->close();
 }
+#endif
+#ifdef gemini
+
+Gemini::Gemini()
+{
+    try 
+    {
+        // filters.push_back(ob::SpatialAdvancedFilter{});
+        // filters.push_back(ob::TemporalFilter{});
+        // filters.push_back(ob::HoleFillingFilter{});
+
+        auto sensor = pipeline.getDevice()->getSensor(OB_SENSOR_DEPTH);
+        auto filters = sensor->createRecommendedFilters();
+        std::cout << "filters amount: " << filters.size() << std::endl;
+        for(auto& filter : filters)
+        {
+            std::cout << filter->getName() << filter->isEnabled() << std::endl;
+            if(filter->getName() == "SpatialAdvancedFilter" || 
+               filter->getName() == "TemporalFilter" || 
+               filter->getName() == "HoleFillingFilter") 
+               {
+                filter->enable(true);
+                std::cout << filter->getName() << " enabled\n";
+               } else
+               {
+                filter->enable(false);
+               }
+        }
+
+        std::shared_ptr<ob::Config> config = std::make_shared<ob::Config>();
+        // Create pipeline and config
+        config->enableVideoStream(OB_STREAM_COLOR, 1280, 720, 30, OB_FORMAT_BGR);
+        config->enableVideoStream(OB_STREAM_DEPTH, 1280, 720, 30, OB_FORMAT_Y16);
+        // config->enableStream(OB_STREAM_COLOR);
+        // config->enableStream(OB_STREAM_DEPTH);
+        config->setAlignMode(ALIGN_D2C_HW_MODE);
+        config->setFrameAggregateOutputMode(OB_FRAME_AGGREGATE_OUTPUT_ALL_TYPE_FRAME_REQUIRE);
+
+        // to check the list of supported properties
+
+        // auto am = pipeline.getDevice()->getSupportedPropertyCount();
+        // for(int i = 0; i < am; i++)
+        // {
+        //     auto prop = pipeline.getDevice()->getSupportedProperty(i);
+        //     std::cout << prop.name << std::endl;
+        // }
+
+        pipeline.getDevice()->setIntProperty(OB_PROP_LASER_CONTROL_INT, 0);
+        pipeline.start(config);
+        auto frameset = pipeline.waitForFrameset();
+        depthFrame = frameset->getFrame(OB_FRAME_DEPTH);
+
+        // Store intrinsics for later use
+        auto profile = std::dynamic_pointer_cast<ob::VideoStreamProfile>(depthFrame->getStreamProfile());
+        if (profile)
+        {
+            intrinsic = profile->getIntrinsic();
+            extrinsic = profile->getExtrinsicTo(profile);
+        }
+
+        frameSize = cv::Size(1280, 720);
+    } 
+    catch (const std::exception &e) 
+    {
+        std::cerr << "Failed to initialize Gemini camera: " << e.what() << std::endl;
+    }
+}
+
+void Gemini::processFrame()
+{
+        auto frameset = pipeline.waitForFrameset();
+        if (!frameset) 
+        {
+            std::cout << "empty frameset!\n";
+            return;
+        }
+        colorFrame = frameset->getFrame(OB_FRAME_COLOR);
+        if(!colorFrame) std::cout << "color nullptr\n";
+        depthFrame = frameset->getFrame(OB_FRAME_DEPTH);
+        if(!depthFrame) std::cout << "depth nullptr\n";  
+        
+        for(auto& filter : filters)
+        {
+            if(filter->isEnabled()) filter->process(depthFrame);
+        }
+}
+
+cv::Mat Gemini::getColorFrame()
+{
+    if (!colorFrame) 
+    {
+        std::cout << "color frame nullptr\n";
+        std::cout << "desired frame size: " << frameSize << std::endl;
+        return {};
+    }
+    // std::cout << "converting rgb frame to opencv mat\n";
+    cv::Mat bgr(frameSize, CV_8UC3, (void *)colorFrame->data());
+    // cv::Mat bgr;
+    // cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
+    return bgr;
+}
+
+cv::Mat Gemini::getDepthFrame()
+{
+    if (!depthFrame) return {};
+    return cv::Mat(frameSize, CV_16UC1, (void *)depthFrame->data()).clone();
+}
+
+float Gemini::getDistance(cv::Point pt)
+{
+    if (!depthFrame) return 0.0f;
+    const uint16_t *depthData = reinterpret_cast<const uint16_t *>(depthFrame->data());
+    return static_cast<float>(depthData[pt.y * frameSize.width + pt.x]) / 1000.0f; // mm to meters
+}
+
+cv::Point3f Gemini::getCartesianPoint(cv::Point pt)
+{
+    if (!depthFrame)
+    {
+        std::cout << "null depth frame\n";
+        return {0,0,0};
+    } 
+        
+    float scale  = depthFrame->as<ob::DepthFrame>()->getValueScale();
+    float depth = reinterpret_cast<const uint16_t *>(depthFrame->data())[pt.y * frameSize.width + pt.x]*scale;
+    // std::cout << "Depth at point: " << depth << std::endl;
+    OBPoint3f point;
+    point.z = depth;
+    transformHelper.transformation2dto3d(OBPoint2f{pt.x, pt.y}, depth, intrinsic,
+    extrinsic, &point);
+
+    return cv::Point3f(point.x, point.y, depth); // in mm
+}
+
+pcl::PointCloud<pcl::PointXYZ> Gemini::getPointCloud()
+{
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+    
+    return cloud;
+}
+
+void Gemini::close()
+{
+    pipeline.stop();
+}
+
 #endif
 
 // int Network::init()
