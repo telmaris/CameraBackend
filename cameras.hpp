@@ -192,8 +192,9 @@ public:
     int lineType = 0; // 0 is horizontal
     bool enableFilters = false;
     std::atomic<bool> isRunning = false;
-    int measurementSeriesLength = 10;
+    int measurementSeriesLength = 30;
     cv::Mat lastFrame;
+    cv::Mat lastDepthFrame;
 };
 
 #endif

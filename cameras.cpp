@@ -98,17 +98,21 @@ void Backend::saveMeasurement()
         // file << coord << " at " << std::put_time(std::localtime(&in_time_t), "%S-%M-%H")
         // << " measurement position: " << measurementLocation << " ROI size: " << roiSize << std::endl;
         file << coord.x << "," << coord.y << "," << coord.z << std::endl;
-        if (savedMeasurements % 10 == 0)
+        if (savedMeasurements % measurementSeriesLength == 0)
             file << std::endl;
         file.close();
         std::this_thread::sleep_for(100ms);
     }
     isRunning = false;
-    std::cout << "Saved 10 measurements!\n";
+    std::cout << "Saved 30 measurements!\n";
     std::stringstream time;
     auto in_time_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    time << std::put_time(std::localtime(&in_time_t), "%S-%M-%H");
-    cv::imwrite("../img/" + cameraName + "_frame_" + time.str() + ".jpg", lastFrame);
+    time << std::put_time(std::localtime(&in_time_t), "%H-%M-%S");
+    cv::imwrite("../img/" + cameraName + "/rgb/frame_" + time.str() + ".jpg", lastFrame);
+    cv::Mat temp;
+    lastDepthFrame.convertTo(temp, CV_8UC1);
+    cv::applyColorMap(temp, temp, cv::COLORMAP_JET);
+    cv::imwrite("../img/" + cameraName + "/depth/frame_" + time.str() + ".jpg", temp);
 }
 
 void Backend::getCartesianLocationWithRoi()
@@ -193,7 +197,7 @@ void Backend::loop()
         camera->processFrame();
         auto color = camera->getColorFrame();
         // std::cout << color.size() << std::endl;
-        auto depth = camera->getDepthFrame();
+        lastDepthFrame = camera->getDepthFrame();
         cv::Mat frame = color;
         lastFrame = frame;
         if (!tuningMode)
@@ -336,7 +340,7 @@ cv::Mat Realsense::getColorFrame()
 
 cv::Mat Realsense::getDepthFrame()
 {
-    cv::Mat frame(frameSize, CV_8UC3, (void *)lastDepthFrame.get_data(), cv::Mat::AUTO_STEP);
+    cv::Mat frame(frameSize, CV_16U, (void *)lastDepthFrame.get_data(), cv::Mat::AUTO_STEP);
     return frame;
 }
 
@@ -429,7 +433,7 @@ cv::Mat ZED::getColorFrame()
 
 cv::Mat ZED::getDepthFrame()
 {
-    cv::Mat frame(frameSize, CV_8UC4, (void *)lastZedDepth.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
+    cv::Mat frame(frameSize, CV_16U, (void *)lastZedDepth.getPtr<sl::uchar1>(), cv::Mat::AUTO_STEP);
     return frame;
 }
 
@@ -767,7 +771,7 @@ cv::Point3f Gemini::getCartesianPoint(cv::Point pt)
     transformHelper.transformation2dto3d(OBPoint2f{pt.x, pt.y}, depth, intrinsic,
     extrinsic, &point);
 
-    return cv::Point3f(point.x, point.y, depth); // in mm
+    return cv::Point3f(point.x, point.y, depth - 0.017); // in mm
 }
 
 pcl::PointCloud<pcl::PointXYZ> Gemini::getPointCloud()
